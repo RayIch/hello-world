@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import json
+import os
+import time
+import shutil
+import schedule
+import logging
+
+# 获取与脚本文件在同一目录下的配置文件
+with open("taskConfig.json", encoding="UTF-8") as config_file:
+    data = json.load(config_file)
+
+
+# 初始化日志路径
+def init_log(log_path):
+    """
+    初始化日志设置
+    :param log_path: 日志文件目录
+    :return:
+    """
+    # TODO 完善其他日志功能，目前暂未记录时间，以后需要加入日志时间
+    logging.basicConfig(filename=log_path, level=logging.DEBUG)
+
+
+# 只拷贝文件，不拷贝目标目录下的子文件夹和子文件夹内的内容
+def file_copy(src, dst, file_name_list):
+    """
+    文件拷贝函数，分割文件名列表，替换<>内的内容，再将文件复制到指定文件夹内，并创建.ok后缀
+    :param src: 源文件夹路径
+    :param dst: 目标文件夹路径
+    :param file_name_list: 文件名称列表，以竖线(|)为分割标志，需要替换的内容以尖括号（<>）为标志，尖括号内替换内容的方式可以自定义
+    :return: 无返回值，文件操作记录存储在日志中
+    """
+    file_names = file_name_list.split("|")  # 分割file_name，将其中包含的文件名取出
+    logging.info("拷贝文件列表：+%s", file_names)
+    for one_file in file_names:
+        file_name = replace_placeholder(one_file)  # 如果文件名中存在<YYYYMMDD> 则需要替换为当前日期
+        src_file_path = src + file_name  # 拼接源文件的完整路径，src为文件夹路径，file_name为文件名
+        dst_file_path = dst + file_name  # 拼接目标文件的完整路径，dst为文件夹路径，file_name为文件名
+        src_okfile_path = src_file_path + '.ok'   # 拼接源文件的完整路径，src为文件夹路径，file_name为文件名
+        dst_okfile_path = dst_file_path + '.ok'  # 拼接目标文件的.ok文件路径
+        if os.path.isfile(src_file_path) and os.path.exists(src_file_path):  # 检查是否为文件，如果是文件则进行拷贝，如果是文件夹则不进行操作
+            try:
+                shutil.copy(src_file_path, dst)  # 将文件拷贝至目标文件夹
+                if not os.path.exists(dst_okfile_path):  # 若.ok文件还不存在，则创建.ok文件
+                    ok_file = open(dst_okfile_path, 'w')  # 创建.ok文件
+                    ok_file.close()  # 关闭文件流
+                    #shutil.copy(src_okfile_path, dst)
+                if os.path.exists(dst_file_path) and os.path.exists(dst_okfile_path):  # 判断文件是否存在
+                    logging.info(src_file_path + "文件拷贝成功，ok文件创建完成")
+                elif os.path.exists(dst_file_path):
+                    logging.info(src_file_path + "文件拷贝成功，ok文件创建失败")
+            except:
+                logging.error("文件拷贝失败，shutil.copy执行失败")
+                return False
+    logging.info("文件处理结束")  # 只拷贝文件，不拷贝目标目录下的子文件夹和子文件夹内的内容
+    return True
+
+
+def replace_placeholder(file_name):
+    """
+    替换文件和文件夹名称内的占位符
+    :param file_name: 文件或文件夹名称
+    :return: 返回处理后的file_name
+    """
+    # TODO 加入更多占位符替换功能，满足业务需求
+    # 替换为当前日期
+    if "<YYYYMMDD>" in file_name:  # 判断名称内是否含有<YYYYMMDD>
+        date_format = time.strftime("%Y%m%d")  # 判断名称内是否
+        file_name = file_name.replace("<YYYYMMDD>", date_format)
+        logging.info("拷贝文件名为：" + file_name)
+        return file_name
+    return file_name
+
+
+def check_directory(file_path):
+    """
+    检查目标目录是否存在，如果不存在则创建新目录
+    :param file_path:
+    :return:
+    """
+    directory = os.path.dirname(replace_placeholder(file_path))
+    is_exist = True  # 默认此目录存在
+    if not os.path.exists(directory):
+        is_exist = False
+        logging.info("目标目录不存在，尝试创建目录")
+        # 创建目录
+        try:
+            os.makedirs(directory)  # 检查目录不存在，则创建此目录
+            is_exist = True
+            logging.info("目标目录不存在，已创建此目录")
+        # 创建异常时进行日志记录
+        except:
+            logging.error("目录创建失败，os.makedirs执行失败")
+        finally:
+            logging.info("目标目录创建结束")
+    return is_exist
+
+
+# 读取配置文件内的日期，与当前时间进行比较
+def is_within_time_period(stime, etime):
+    time_flag = False  # 默认不在运行时段内
+    today_date = time.strftime("%Y%m%d ")  # 获取当前的日期，精确到天 后面要加空格，以便匹配%Y%m%d %H%M格式
+
+    # 格式化配置文件日期
+    start_strftime = today_date + stime
+    end_strftime = today_date + etime
+    try:
+        # 将格式化后的日期转为time格式
+        start_time = time.mktime(time.strptime(start_strftime, "%Y%m%d %H:%M:%S"))
+        end_time = time.mktime(time.strptime(end_strftime, "%Y%m%d %H:%M:%S"))
+        now_time = time.time()  # 获取当前时间的time格式
+
+        if start_time <= now_time <= end_time:
+            time_flag = True
+    except:
+        print("日期转换出错，请检查配置文件时间信息！")
+        logging.error("日期转换出错，请检查配置文件时间信息！")
+        return time_flag
+    return time_flag
+
+
+# 文件拷贝的任务
+def file_copy_task():
+    """
+    读取配置文件中的发送任务
+    :return:
+    """
+    within_period = False  # 检查是否在执行时段内
+    while not within_period:
+        initial_source_path = data["task_to_zd"]["path"]["src"]  # 读取起始文件夹路径
+        initial_destination_path = data["task_to_zd"]["path"]["destination"]  # 读取目标文件夹路径
+        initial_file_name_list = data["task_to_zd"]["path"]["file_name_list"]  # 读取待拷贝文件列表
+        initial_task_start_time = data["task_to_zd"]["period"]["start_time"]  # 读取起始时间
+        initial_task_end_time = data["task_to_zd"]["period"]["end_time"]  # 读取结束时间
+
+        within_period = is_within_time_period(initial_task_start_time, initial_task_end_time)  # 判断是否在执行时段内
+
+        dir_check_result = check_directory(initial_destination_path)  # 检查目标路径是否存在，如果配置文件内的路径不存在，则尝试创建此路径
+        if dir_check_result and within_period:
+            # 文件拷贝，创建.ok文件
+            file_copy(initial_source_path, initial_destination_path, initial_file_name_list)
+        else:
+            logging.error("目标目录不存在，任务执行失败")
+        # time.sleep(5)
+
+
+def main():
+    log_path = data["global_settings"]["log_path"]  # 日志文件路径
+    init_log(log_path)  # 初始化日志配置
+    # schedule.every().day.at("15:50").do(file_copy_task)
+    # while True:
+    #     schedule.run_pending()
+    #     time.sleep(5)
+    #     running_info = time.strftime("%Y%m%d %H:%M:%S")
+    #     print(running_info + " 程序运行中")
+
+    file_copy_task()
+
+
+if __name__ == "__main__":
+    main()
